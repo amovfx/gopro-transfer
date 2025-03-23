@@ -1,12 +1,12 @@
 """Main entry point for GoPro Transfer application."""
 
-import argparse
 import os
 import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
 
+import fire
 from loguru import logger
 
 from gopro_transfer.config import get_settings, Settings
@@ -137,32 +137,57 @@ def get_file_date(file_path):
     return datetime.now()
 
 
-def transfer_files(media_files, destination_base, move=False, date_format=None):
-    """Transfer files to destination organized by date.
+def transfer_files(
+    source_path=None,
+    destination_path=None,
+    media_dir=None,
+    date_format=None,
+    file_extensions=None,
+    move=False,
+):
+    """Transfer files from GoPro SD card to destination organized by date.
 
     Args:
-        media_files: List of media file paths
-        destination_base: Base destination directory
+        source_path: Path to the GoPro SD card or custom source
+        destination_path: Destination path for media files
+        media_dir: Media directory name on the SD card
+        date_format: Format string for date folders
+        file_extensions: Comma-separated list of file extensions to look for
         move: Whether to move files instead of copying
-        date_format: Format string for date folders, uses config default if None
 
     Returns:
-        int: Number of files transferred
+        list: List of tuple pairs (source_path, dest_path) of transferred files
     """
     settings = get_settings()
-    date_format = date_format or settings.date_format
 
-    destination_path = Path(destination_base)
+    # Use provided values or defaults from settings
+    source = source_path or settings.source_path
+    destination = destination_path or settings.destination_path
+    media_dirname = media_dir or settings.media_dir
+    date_fmt = date_format or settings.date_format
+    extensions = file_extensions or settings.file_extensions
+
+    # Get GoPro SD card path
+    gopro_path = get_gopro_mount_path(source)
+    if not gopro_path:
+        logger.error("Failed to find GoPro SD card")
+        return []
+
+    # Find media files
+    media_files = get_media_files(gopro_path, media_dirname)
+    if not media_files:
+        logger.error("No media files found")
+        return []
+
+    destination_path = Path(destination)
 
     # Ensure the destination directory exists
     destination_path.mkdir(parents=True, exist_ok=True)
 
     operation = "Moving" if move else "Copying"
-    logger.info(
-        f"{operation} files to {destination_path} using date format {date_format}"
-    )
+    logger.info(f"{operation} files to {destination_path} using date format {date_fmt}")
 
-    transferred_count = 0
+    transferred_files = []
     total_size = 0
 
     for file_path in media_files:
@@ -171,7 +196,7 @@ def transfer_files(media_files, destination_base, move=False, date_format=None):
 
         # Get file date and format according to config
         file_date = get_file_date(file_path)
-        date_folder = file_date.strftime(date_format)
+        date_folder = file_date.strftime(date_fmt)
 
         # Create date folder if it doesn't exist
         date_dir = destination_path / date_folder
@@ -198,7 +223,7 @@ def transfer_files(media_files, destination_base, move=False, date_format=None):
                 shutil.move(str(file_path), str(dest_file))
             else:
                 shutil.copy2(str(file_path), str(dest_file))
-            transferred_count += 1
+            transferred_files.append((str(file_path), str(dest_file)))
             total_size += metadata["size"]
             logger.debug(f"Successfully transferred {file_path.name}")
         except Exception as e:
@@ -207,10 +232,10 @@ def transfer_files(media_files, destination_base, move=False, date_format=None):
     # Calculate total size in MB
     total_size_mb = total_size / (1024 * 1024)
     logger.success(
-        f"Total transferred: {transferred_count} files ({total_size_mb:.1f} MB)"
+        f"Total transferred: {len(transferred_files)} files ({total_size_mb:.1f} MB)"
     )
 
-    return transferred_count
+    return transferred_files
 
 
 def list_media_info(media_files):
@@ -237,92 +262,110 @@ def list_media_info(media_files):
         logger.debug(f"File info: {info}")
 
 
-def parse_args():
-    """Parse command line arguments.
+class GoProTransfer:
+    """GoPro Transfer CLI tool for managing GoPro media files."""
 
-    Returns:
-        argparse.Namespace: Parsed arguments
-    """
-    settings = get_settings()
+    def __init__(self):
+        """Initialize the GoProTransfer class."""
+        # Setup logging with default settings
+        setup_logging()
+        logger.info("GoPro Transfer - Initialized")
 
-    parser = argparse.ArgumentParser(
-        description="Transfer files from GoPro SD card to organized folders"
-    )
-    parser.add_argument(
-        "--source", "-s", help=f"Custom source path (default: {settings.source_path})"
-    )
-    parser.add_argument(
-        "--destination",
-        "-d",
-        default=settings.destination_path,
-        help=f"Destination path for videos (default: {settings.destination_path})",
-    )
-    parser.add_argument(
-        "--media-dir",
-        "-m",
-        default=None,
-        help=f"Media directory name on the SD card (default: {settings.media_dir})",
-    )
-    parser.add_argument(
-        "--move", action="store_true", help="Move files instead of copying them"
-    )
-    parser.add_argument(
-        "--date-format",
-        default=None,
-        help=f"Format for date folders (default: {settings.date_format})",
-    )
-    parser.add_argument(
-        "--list", action="store_true", help="List media files without transferring"
-    )
-    parser.add_argument(
-        "--log-level",
-        default=None,
-        choices=["TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"],
-        help="Set logging level",
-    )
-    parser.add_argument("--log-file", default=None, help="Path to log file")
+    def transfer(
+        self,
+        source=None,
+        destination=None,
+        media_dir=None,
+        date_format=None,
+        move=False,
+        log_level=None,
+        log_file=None,
+    ):
+        """Transfer files from GoPro SD card to organized folders.
 
-    return parser.parse_args()
+        Args:
+            source: Path to the GoPro SD card
+            destination: Destination path for videos
+            media_dir: Media directory name on the SD card
+            date_format: Format for date folders
+            move: Move files instead of copying them
+            log_level: Set logging level (TRACE, DEBUG, INFO, SUCCESS, WARNING, ERROR, CRITICAL)
+            log_file: Path to log file
 
+        Returns:
+            int: 0 for success, 1 for error
+        """
+        # Setup logging with command line options
+        setup_logging(log_level=log_level, log_file=log_file)
+        logger.info("GoPro Transfer - Starting transfer operation")
 
-def main():
-    """Run the GoPro Transfer application."""
-    args = parse_args()
+        # Get settings
+        settings = get_settings()
+        destination_base = destination or settings.destination_path
 
-    # Setup logging with command line options or environment variables
-    setup_logging(log_level=args.log_level, log_file=args.log_file)
+        # Transfer files
+        transferred = transfer_files(
+            source,
+            destination_base,
+            media_dir,
+            date_format,
+            None,  # Use default file extensions
+            move,
+        )
 
-    logger.info("GoPro Transfer - Starting")
+        # Report results
+        operation = "moved" if move else "copied"
+        if transferred:
+            logger.success(f"Successfully {operation} {len(transferred)} files")
+            logger.info(f"Files organized in date folders at: {destination_base}")
+            return 0
+        else:
+            logger.error("No files were transferred")
+            return 1
 
-    # Get GoPro SD card path
-    gopro_path = get_gopro_mount_path(args.source)
-    if not gopro_path:
-        logger.error("Failed to find GoPro SD card")
-        return 1
+    def list(
+        self,
+        source=None,
+        media_dir=None,
+        log_level=None,
+        log_file=None,
+    ):
+        """List media files on the GoPro SD card without transferring.
 
-    # Find media files
-    media_files = get_media_files(gopro_path, args.media_dir)
-    if not media_files:
-        logger.error("No media files found")
-        return 1
+        Args:
+            source: Path to the GoPro SD card
+            media_dir: Media directory name on the SD card
+            log_level: Set logging level (TRACE, DEBUG, INFO, SUCCESS, WARNING, ERROR, CRITICAL)
+            log_file: Path to log file
 
-    # If list mode is enabled, just show the files and exit
-    if args.list:
+        Returns:
+            int: 0 for success, 1 for error
+        """
+        # Setup logging with command line options
+        setup_logging(log_level=log_level, log_file=log_file)
+        logger.info("GoPro Transfer - Listing media files")
+
+        # Get GoPro SD card path
+        gopro_path = get_gopro_mount_path(source)
+        if not gopro_path:
+            logger.error("Failed to find GoPro SD card")
+            return 1
+
+        # Find media files
+        media_files = get_media_files(gopro_path, media_dir)
+        if not media_files:
+            logger.error("No media files found")
+            return 1
+
+        # Show the files
         list_media_info(media_files)
         return 0
 
-    # Transfer files
-    destination_base = Path(args.destination)
-    transferred = transfer_files(
-        media_files, destination_base, args.move, args.date_format
-    )
 
-    # Report results
-    operation = "moved" if args.move else "copied"
-    logger.success(f"Successfully {operation} {transferred} files")
-    logger.info(f"Files organized in date folders at: {destination_base}")
-
-    return 0
+def main():
+    """Run the GoPro Transfer application with Fire CLI."""
+    # Return the exit code
+    return fire.Fire(GoProTransfer)
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 """Example script demonstrating how to use the gopro-transfer library with environment variables."""
 
 import os
@@ -10,7 +10,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from gopro_transfer.config import Settings
 from gopro_transfer.logger import setup_logger
-from gopro_transfer.main import transfer_files
+from gopro_transfer.main import GoProTransfer
 
 
 def main():
@@ -46,25 +46,27 @@ def main():
     # Start the transfer process
     logger.info("Starting file transfer...")
     try:
-        transferred_files = transfer_files(
-            settings.source_path,
-            settings.destination_path,
-            settings.media_dir,
-            settings.date_format,
-            settings.file_extensions,
-        )
-        logger.success(f"Successfully transferred {len(transferred_files)} files")
+        # Create a new GoProTransfer instance
+        transfer = GoProTransfer()
 
-        # Print out the transferred files
-        if transferred_files:
-            logger.info("Transferred files:")
-            for src, dest in transferred_files:
-                logger.info(f"  {src} -> {dest}")
+        # Call the transfer method
+        result = transfer.transfer(
+            source=settings.source_path,
+            destination=settings.destination_path,
+            media_dir=settings.media_dir,
+            date_format=settings.date_format,
+            log_level="INFO",
+        )
+
+        if result == 0:
+            logger.success("Transfer completed successfully")
+        else:
+            logger.error("Transfer failed")
+            return 1
     except Exception as e:
         logger.error(f"Error during transfer: {e}")
         return 1
 
-    logger.info("Transfer completed successfully")
     return 0
 
 

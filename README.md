@@ -28,27 +28,46 @@ pip install -e .
 
 ## Usage
 
-Basic usage:
+### Command Line Interface
+
+The application uses Google [Fire](https://github.com/google/python-fire) for its command-line interface, providing a simple and flexible way to interact with the tool.
+
+Basic usage examples:
 
 ```bash
-# Copy files from your GoPro SD card to your computer
-gopro-transfer
+# Transfer files with default settings
+gopro-transfer transfer
+
+# List files on the GoPro SD card without transferring
+gopro-transfer list
+
+# Transfer files from a custom source path
+gopro-transfer transfer --source /path/to/gopro
+
+# Transfer files to a custom destination
+gopro-transfer transfer --destination ~/Videos/GoPro-Footage
 
 # Move files instead of copying
-gopro-transfer --move
+gopro-transfer transfer --move
 
-# List files without transferring
-gopro-transfer --list
+# Set custom logging level 
+gopro-transfer transfer --log-level DEBUG
+
+# Combining multiple options
+gopro-transfer transfer --source /Volumes/GOPRO --destination ~/Videos --media-dir 101GOPRO --move
 ```
 
-Advanced options:
+Fire automatically generates help documentation based on docstrings. You can view the help with:
 
 ```bash
-# Specify custom source and destination paths
-gopro-transfer --source /path/to/gopro --destination /path/to/save
+# Show top-level help
+gopro-transfer --help
 
-# Use a specific media directory on the SD card
-gopro-transfer --media-dir 101GOPRO
+# Show help for the transfer command
+gopro-transfer transfer --help
+
+# Show help for the list command
+gopro-transfer list --help
 ```
 
 ## Configuration
